@@ -1,0 +1,4 @@
+target/
+crates/comfy-shell/.winappsdk/
+crates/comfy-shell/src/bindings.rs
+package-out/

@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/comfy-graph",
+    "crates/comfy-shell",
+]
+# comfy-shell needs Windows App SDK metadata fetched by its build script,
+# so plain `cargo build` at the workspace root only builds the core crates.
+default-members = [
+    "crates/comfy-graph",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/comfyanonymous/ComfyUI"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+indexmap = "2"
+thiserror = "2"

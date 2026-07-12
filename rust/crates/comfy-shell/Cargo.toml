@@ -1,0 +1,53 @@
+[package]
+name = "comfy-shell"
+description = "WinUI 3 desktop shell for ComfyUI (windows-rs, AppContainer-packaged)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+comfy-graph = { path = "../comfy-graph" }
+serde_json = { workspace = true }
+windows = { version = "0.62", features = [
+    "ApplicationModel_Activation",
+    "ApplicationModel_Background",
+    "ApplicationModel_Contacts",
+    "ApplicationModel_Core",
+    "ApplicationModel_DataTransfer",
+    "ApplicationModel_DataTransfer_DragDrop",
+    "ApplicationModel_DataTransfer_DragDrop_Core",
+    "Devices_Geolocation",
+    "Devices_Input",
+    "Foundation",
+    "Foundation_Collections",
+    "Foundation_Numerics",
+    "Globalization",
+    "Globalization_NumberFormatting",
+    "Graphics",
+    "Graphics_Effects",
+    "Graphics_Imaging",
+    "Graphics_Printing",
+    "Media_Casting",
+    "Media_Playback",
+    "Security_Cryptography_Certificates",
+    "Storage_Streams",
+    "System",
+    "UI",
+    "UI_Composition",
+    "UI_Core",
+    "UI_Text",
+
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_WinRT",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62"
+windows-collections = "0.3"
+windows-numerics = "0.3"
+windows-future = "0.3"
+
+[build-dependencies]
+windows-bindgen = "=0.64.0"

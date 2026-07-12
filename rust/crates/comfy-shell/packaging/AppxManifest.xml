@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest for the ComfyUI Rust shell.
+
+  The application runs in an AppContainer (uap10:TrustLevel="appContainer"),
+  so it is process-isolated with brokered access to user resources rather
+  than running full trust. The Windows App Runtime 2.x framework package
+  supplies WinUI 3 inside the container.
+
+  Note: AppContainer processes cannot reach localhost servers by default.
+  While the Python backend still runs out of process during the migration,
+  grant a loopback exemption for development:
+    CheckNetIsolation.exe LoopbackExempt -a -n=ComfyUI.Shell_<publisher-hash>
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 rescap">
+
+  <Identity
+    Name="ComfyUI.Shell"
+    Publisher="CN=ComfyUI Development"
+    Version="0.1.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ComfyUI</DisplayName>
+    <PublisherDisplayName>ComfyUI</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+    <PackageDependency
+      Name="Microsoft.WindowsAppRuntime.2"
+      MinVersion="2.2.0.0"
+      Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application
+      Id="ComfyUI"
+      Executable="comfy-shell.exe"
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="appContainer">
+      <uap:VisualElements
+        DisplayName="ComfyUI"
+        Description="ComfyUI native shell"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <Capability Name="privateNetworkClientServer" />
+  </Capabilities>
+</Package>
