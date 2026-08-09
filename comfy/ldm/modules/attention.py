@@ -48,7 +48,8 @@ except ImportError as e:
             logging.warning(f"--use-sage-attention3 was requested but the sageattn3 package failed to load: {e}\nThe installed wheel likely does not match this pytorch build, falling back to pytorch attention.")
 
 FLASH_ATTENTION_IS_AVAILABLE = False
-FLASH_ATTN_SDPA_FALLBACK_LOGGED = False
+FLASH_ATTN_SDPA_FALLBACK_LOGGED = set()  # distinct failure messages already logged
+SAGE3_FALLBACK_LOGGED = False
 try:
     from flash_attn import flash_attn_func
     FLASH_ATTENTION_IS_AVAILABLE = True
@@ -673,7 +674,10 @@ def attention3_sage(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
         out = sageattn3_blackwell(q_s, k_s, v_s, is_causal=False)
     except Exception as e:
         exception_fallback = True
-        logging.error("Error running SageAttention3: %s, falling back to pytorch attention.", e)
+        global SAGE3_FALLBACK_LOGGED
+        if not SAGE3_FALLBACK_LOGGED:
+            SAGE3_FALLBACK_LOGGED = True
+            logging.error("Error running SageAttention3: %s, falling back to pytorch attention.", e)
 
     if exception_fallback:
         if not skip_reshape:
@@ -747,9 +751,11 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
                 softmax_scale=kwargs.get("scale", -1.0),
             ).transpose(1, 2)
         except Exception as e:
-            global FLASH_ATTN_SDPA_FALLBACK_LOGGED
-            if not FLASH_ATTN_SDPA_FALLBACK_LOGGED:
-                FLASH_ATTN_SDPA_FALLBACK_LOGGED = True
+            # Log each distinct failure once, a per call log would spam and a
+            # single global flag would hide new failure causes later on.
+            msg = str(e)
+            if msg not in FLASH_ATTN_SDPA_FALLBACK_LOGGED:
+                FLASH_ATTN_SDPA_FALLBACK_LOGGED.add(msg)
                 logging.warning(f"Flash Attention failed, using default SDPA: {e}")
             sdpa_fallback = True
     if sdpa_fallback:
@@ -769,10 +775,13 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
 optimized_attention = attention_basic
 
 if model_management.sage_attention3_enabled() and SAGE_ATTENTION3_IS_AVAILABLE:
-    if not model_management.is_nvidia_blackwell_or_newer():
-        logging.warning("--use-sage-attention3 requires a Blackwell or newer GPU, most attention will fall back to pytorch attention.")
-    logging.info("Using sage attention 3")
-    optimized_attention = attention3_sage
+    if model_management.is_nvidia_blackwell_or_newer():
+        logging.info("Using sage attention 3")
+        optimized_attention = attention3_sage
+    else:
+        # The sm_120 kernel would fail on every call, do not install it at all.
+        logging.warning("--use-sage-attention3 requires a Blackwell or newer GPU, using pytorch attention instead.")
+        optimized_attention = attention_pytorch
 elif model_management.sage_attention3_enabled():
     logging.warning("sage attention 3 is not available, using pytorch attention instead.")
     optimized_attention = attention_pytorch

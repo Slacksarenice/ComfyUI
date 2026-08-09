@@ -1013,12 +1013,6 @@ class VAE:
             dtype = model_management.vae_dtype(self.device, self.working_dtypes)
         self.vae_dtype = dtype
         self.first_stage_model.to(self.vae_dtype)
-        if self.latent_dim == 2 and model_management.force_channels_last():
-            try:
-                self.first_stage_model.to(memory_format=torch.channels_last)
-                logging.debug("using channels last mode for VAE")
-            except Exception:
-                pass
         model_management.archive_model_dtypes(self.first_stage_model)
         self.output_device = model_management.intermediate_device()
 
@@ -1033,6 +1027,15 @@ class VAE:
 
         if len(u) > 0:
             logging.debug("Leftover VAE keys {}".format(u))
+
+        if self.latent_dim == 2 and model_management.force_channels_last():
+            # Must happen after load_state_dict: with assign=True the checkpoint
+            # tensors replace the parameters and would discard the layout.
+            try:
+                self.first_stage_model.to(memory_format=torch.channels_last)
+                logging.debug("using channels last mode for VAE")
+            except Exception:
+                pass
 
         logging.info("VAE load device: {}, offload device: {}, dtype: {}".format(self.device, offload_device, self.vae_dtype))
         self.model_size()
@@ -1218,16 +1221,31 @@ class VAE:
                 elif dims == 3:
                     tile = 256 // self.spacial_compression_decode()
                     overlap = tile // 4
-                    tile_t = None
-                    overlap_t = None
-                    temporal_compression = self.temporal_compression_decode()
-                    if temporal_compression is not None:
-                        tile_t = max(2, 64 // temporal_compression)
-                        overlap_t = max(1, min(tile_t // 2, 8 // temporal_compression))
-                    if self.handles_tiling:
-                        pixel_samples = self._decode_tiled_owned(samples_in, **self._owned_tiled_args(tile, tile, overlap, tile_t, overlap_t))
-                    else:
-                        pixel_samples = self.decode_tiled_3d(samples_in, tile_t=tile_t if tile_t is not None else 999, tile_x=tile, tile_y=tile, overlap=(overlap_t if overlap_t is not None else 1, overlap, overlap))
+                    do_tile_t = False
+                    try:
+                        # Spatial tiling only first: keeping the temporal axis whole
+                        # preserves the frame context of causal video VAEs.
+                        if self.handles_tiling:
+                            pixel_samples = self._decode_tiled_owned(samples_in, tile_x=tile, tile_y=tile, overlap=overlap)
+                        else:
+                            pixel_samples = self.decode_tiled_3d(samples_in, tile_x=tile, tile_y=tile, overlap=(1, overlap, overlap))
+                    except Exception as e:
+                        model_management.raise_non_oom(e)
+                        logging.warning("Warning: Ran out of memory in spatial tiled VAE decoding, retrying with temporal tiling as well. Seams between temporal tiles may be visible.")
+                        do_tile_t = True
+
+                    if do_tile_t:
+                        comfy.model_management.soft_empty_cache()
+                        tile_t = None
+                        overlap_t = None
+                        temporal_compression = self.temporal_compression_decode()
+                        if temporal_compression is not None:
+                            tile_t = max(2, 64 // temporal_compression)
+                            overlap_t = max(1, min(tile_t // 2, 8 // temporal_compression))
+                        if self.handles_tiling:
+                            pixel_samples = self._decode_tiled_owned(samples_in, **self._owned_tiled_args(tile, tile, overlap, tile_t, overlap_t))
+                        else:
+                            pixel_samples = self.decode_tiled_3d(samples_in, tile_t=tile_t if tile_t is not None else 999, tile_x=tile, tile_y=tile, overlap=(overlap_t if overlap_t is not None else 1, overlap, overlap))
 
         pixel_samples = pixel_samples.to(self.output_device).movedim(1,-1)
         return pixel_samples
@@ -1312,10 +1330,29 @@ class VAE:
                     if self.handles_tiling:
                         samples = self._encode_tiled_owned(pixel_samples, tile_x=tile, tile_y=tile, overlap=overlap)
                     else:
-                        tile_t_latent = max(2, self.downscale_ratio[0](64))
-                        tile_t = self.upscale_ratio[0](tile_t_latent)
-                        overlap_t = self.upscale_ratio[0](max(1, min(tile_t_latent // 2, self.downscale_ratio[0](8))))
-                        samples = self.encode_tiled_3d(pixel_samples, tile_t=tile_t, tile_x=tile, tile_y=tile, overlap=(overlap_t, overlap, overlap))
+                        do_tile_t = False
+                        try:
+                            # Spatial tiling only first, same reasoning as decode.
+                            samples = self.encode_tiled_3d(pixel_samples, tile_x=tile, tile_y=tile, overlap=(1, overlap, overlap))
+                        except Exception as e:
+                            model_management.raise_non_oom(e)
+                            logging.warning("Warning: Ran out of memory in spatial tiled VAE encoding, retrying with temporal tiling as well.")
+                            do_tile_t = True
+
+                        if do_tile_t:
+                            comfy.model_management.soft_empty_cache()
+                            try:
+                                tile_t_latent = max(2, self.downscale_ratio[0](64))
+                                tile_t = self.upscale_ratio[0](tile_t_latent)
+                                overlap_t = self.upscale_ratio[0](max(1, min(tile_t_latent // 2, self.downscale_ratio[0](8))))
+                            except (TypeError, IndexError):
+                                # Some VAEs use plain numbers for the ratios, temporal
+                                # tile sizes cannot be derived from those.
+                                tile_t = None
+                            if tile_t is None:
+                                samples = self.encode_tiled_3d(pixel_samples, tile_x=tile, tile_y=tile, overlap=(1, overlap, overlap))
+                            else:
+                                samples = self.encode_tiled_3d(pixel_samples, tile_t=tile_t, tile_x=tile, tile_y=tile, overlap=(overlap_t, overlap, overlap))
                 elif self.latent_dim == 1 or self.extra_1d_channel is not None:
                     samples = self.encode_tiled_1d(pixel_samples)
                 else:

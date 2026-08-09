@@ -65,6 +65,7 @@ def cuda_malloc_supported():
 
 
 version = ""
+torch_cuda_version = None  # torch.version.cuda, set on every CUDA build even without a +cu version suffix
 
 try:
     torch_spec = importlib.util.find_spec("torch")
@@ -75,6 +76,7 @@ try:
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             version = module.__version__
+            torch_cuda_version = getattr(module, "cuda", None)
 except:
     pass
 
@@ -110,10 +112,16 @@ if args.cuda_malloc:
         env_var += ",backend:cudaMallocAsync"
 
     os.environ['PYTORCH_CUDA_ALLOC_CONF'] = env_var
-elif os.name != 'nt' and "+cu" in version:
+elif os.name != 'nt' and not args.disable_cuda_malloc and torch_cuda_version is not None:
     # Native caching allocator: expandable segments reduce VRAM fragmentation.
-    # Not supported on Windows, and never override a user provided config.
-    if os.environ.get('PYTORCH_CUDA_ALLOC_CONF', None) is None:
+    # Not supported on Windows, only exists on torch 2.1+, and never applied
+    # when the user provided their own config or explicitly asked for the
+    # stock allocator with --disable-cuda-malloc.
+    try:
+        torch_at_least_2_1 = tuple(int(x) for x in version.split("+")[0].split(".")[:2]) >= (2, 1)
+    except ValueError:
+        torch_at_least_2_1 = False
+    if torch_at_least_2_1 and os.environ.get('PYTORCH_CUDA_ALLOC_CONF', None) is None:
         os.environ['PYTORCH_CUDA_ALLOC_CONF'] = "expandable_segments:True"
 
 def get_torch_version_noimport():

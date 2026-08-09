@@ -179,8 +179,13 @@ class BaseModel(torch.nn.Module):
             self.diffusion_model.requires_grad_(False)
             self.diffusion_model.eval()
             if comfy.model_management.force_channels_last():
-                self.diffusion_model.to(memory_format=torch.channels_last)
-                logging.debug("using channels last mode for diffusion model")
+                # Module.to converts every rank 4 and 5 parameter and buffer, but
+                # rank 5 Conv3d weights cannot take the rank 4 channels_last
+                # format, so skip models that have any (most video models).
+                if not any(t.dim() == 5 for t in self.diffusion_model.parameters()) and \
+                        not any(t.dim() == 5 for t in self.diffusion_model.buffers()):
+                    self.diffusion_model.to(memory_format=torch.channels_last)
+                    logging.debug("using channels last mode for diffusion model")
             logging.info("model weight dtype {}, manual cast: {}".format(self.get_dtype(), self.manual_cast_dtype))
             comfy.model_management.archive_model_dtypes(self.diffusion_model)
 
