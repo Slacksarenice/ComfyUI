@@ -110,6 +110,11 @@ if args.cuda_malloc:
         env_var += ",backend:cudaMallocAsync"
 
     os.environ['PYTORCH_CUDA_ALLOC_CONF'] = env_var
+elif os.name != 'nt' and "+cu" in version:
+    # Native caching allocator: expandable segments reduce VRAM fragmentation.
+    # Not supported on Windows, and never override a user provided config.
+    if os.environ.get('PYTORCH_CUDA_ALLOC_CONF', None) is None:
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = "expandable_segments:True"
 
 def get_torch_version_noimport():
     return str(version)
