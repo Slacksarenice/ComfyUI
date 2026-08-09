@@ -524,6 +524,20 @@ if ENABLE_PYTORCH_ATTENTION:
     torch.backends.cuda.enable_math_sdp(True)
     torch.backends.cuda.enable_flash_sdp(True)
     torch.backends.cuda.enable_mem_efficient_sdp(True)
+    try:
+        torch.backends.cuda.enable_cudnn_sdp(True)
+    except AttributeError:
+        pass
+
+def is_nvidia_blackwell_or_newer(device=None):
+    if not is_nvidia():
+        return False
+    if device is None:
+        device = get_torch_device()
+    if not is_device_cuda(device):
+        return False
+    props = torch.cuda.get_device_properties(device)
+    return props.major >= 10
 
 
 PRIORITIZE_FP16 = False  # TODO: remove and replace with something that shows exactly which dtype is faster than the other
@@ -1657,6 +1671,9 @@ def unpin_memory(tensor):
 
 def sage_attention_enabled():
     return args.use_sage_attention
+
+def sage_attention3_enabled():
+    return args.use_sage_attention3
 
 def flash_attention_enabled():
     return args.use_flash_attention

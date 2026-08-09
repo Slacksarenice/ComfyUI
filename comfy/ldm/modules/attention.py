@@ -37,10 +37,16 @@ SAGE_ATTENTION3_IS_AVAILABLE = False
 try:
     from sageattn3 import sageattn3_blackwell
     SAGE_ATTENTION3_IS_AVAILABLE = True
-except ImportError:
-    pass
+except ImportError as e:
+    if model_management.sage_attention3_enabled():
+        if e.name == "sageattn3":
+            logging.error(f"\n\nTo use the `--use-sage-attention3` feature, the `sageattn3` package must be installed first.\ncommand:\n\t{sys.executable} -m pip install sageattn3")
+        else:
+            raise e
+        exit(-1)
 
 FLASH_ATTENTION_IS_AVAILABLE = False
+FLASH_ATTN_SDPA_FALLBACK_LOGGED = False
 try:
     from flash_attn import flash_attn_func
     FLASH_ATTENTION_IS_AVAILABLE = True
@@ -727,25 +733,30 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
         if mask.ndim == 3:
             mask = mask.unsqueeze(1)
 
-    try:
-        if mask is not None:
-            raise RuntimeError("Mask must not be set for Flash attention")
-        out = flash_attn_wrapper(
-            q.transpose(1, 2),
-            k.transpose(1, 2),
-            v.transpose(1, 2),
-            dropout_p=0.0,
-            causal=False,
-            softmax_scale=kwargs.get("scale", -1.0),
-        ).transpose(1, 2)
-    except Exception as e:
-        logging.warning(f"Flash Attention failed, using default SDPA: {e}")
+    sdpa_fallback = mask is not None
+    if not sdpa_fallback:
+        try:
+            out = flash_attn_wrapper(
+                q.transpose(1, 2),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                dropout_p=0.0,
+                causal=False,
+                softmax_scale=kwargs.get("scale", -1.0),
+            ).transpose(1, 2)
+        except Exception as e:
+            global FLASH_ATTN_SDPA_FALLBACK_LOGGED
+            if not FLASH_ATTN_SDPA_FALLBACK_LOGGED:
+                FLASH_ATTN_SDPA_FALLBACK_LOGGED = True
+                logging.warning(f"Flash Attention failed, using default SDPA: {e}")
+            sdpa_fallback = True
+    if sdpa_fallback:
         sdpa_extra = {}
         if kwargs.get("enable_gqa", False):
             sdpa_extra["enable_gqa"] = True
         if "scale" in kwargs:
             sdpa_extra["scale"] = kwargs["scale"]
-        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False, **sdpa_extra)
+        out = comfy.ops.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False, **sdpa_extra)
     if not skip_output_reshape:
         out = (
             out.transpose(1, 2).reshape(b, -1, heads * dim_head)
@@ -755,7 +766,12 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
 
 optimized_attention = attention_basic
 
-if model_management.sage_attention_enabled():
+if model_management.sage_attention3_enabled():
+    if not model_management.is_nvidia_blackwell_or_newer():
+        logging.warning("--use-sage-attention3 requires a Blackwell or newer GPU, most attention will fall back to pytorch attention.")
+    logging.info("Using sage attention 3")
+    optimized_attention = attention3_sage
+elif model_management.sage_attention_enabled():
     logging.info("Using sage attention")
     optimized_attention = attention_sage
 elif model_management.flash_attention_enabled():

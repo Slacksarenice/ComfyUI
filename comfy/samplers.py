@@ -25,6 +25,8 @@ import scipy.stats
 import numpy
 
 
+cond_obj = collections.namedtuple('cond_obj', ['input_x', 'mult', 'conditioning', 'area', 'control', 'patches', 'uuid', 'hooks'])
+
 def add_area_dims(area, num_dims):
     while (len(area) // 2) < num_dims:
         area = [2147483648] + area[:len(area) // 2] + [0] + area[len(area) // 2:]
@@ -112,7 +114,6 @@ def get_area_and_mult(conds, x_in, timestep_in):
 
         patches['middle_patch'] = [gligen_patch]
 
-    cond_obj = collections.namedtuple('cond_obj', ['input_x', 'mult', 'conditioning', 'area', 'control', 'patches', 'uuid', 'hooks'])
     return cond_obj(input_x, mult, conditioning, area, control, patches, conds['uuid'], hooks)
 
 def cond_equal_size(c1, c2):
@@ -271,8 +272,8 @@ def _calc_cond_batch(model: BaseModel, conds: list[list[dict]], x_in: torch.Tens
             to_batch = to_batch_temp[:1]
 
             free_memory = model.current_patcher.get_free_memory(x_in.device)
-            for i in range(1, len(to_batch_temp) + 1):
-                batch_amount = to_batch_temp[:len(to_batch_temp)//i]
+            for n in range(len(to_batch_temp), 0, -1):
+                batch_amount = to_batch_temp[:n]
                 input_shape = [len(batch_amount) * first_shape[0]] + list(first_shape)[1:]
                 cond_shapes = collections.defaultdict(list)
                 for tt in batch_amount:
@@ -437,8 +438,8 @@ def _calc_cond_batch_multigpu(model: BaseModel, conds: list[list[dict]], x_in: t
             to_batch = to_batch_temp[:1]
 
             free_memory = comfy.model_management.get_free_memory(current_device)
-            for i in range(1, len(to_batch_temp) + 1):
-                batch_amount = to_batch_temp[:len(to_batch_temp)//i]
+            for n in range(len(to_batch_temp), 0, -1):
+                batch_amount = to_batch_temp[:n]
                 input_shape = [len(batch_amount) * first_shape[0]] + list(first_shape)[1:]
                 cond_shapes = collections.defaultdict(list)
                 for tt in batch_amount:

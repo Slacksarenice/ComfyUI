@@ -11,6 +11,7 @@ from comfy.ldm.flux.layers import EmbedND
 from comfy.ldm.flux.math import apply_rope1, rope
 import comfy.ldm.common_dit
 import comfy.model_management
+import comfy.model_prefetch
 import comfy.ops
 import comfy.patcher_extension
 
@@ -605,7 +606,9 @@ class WanModel(torch.nn.Module):
         blocks_replace = patches_replace.get("dit", {})
         transformer_options["total_blocks"] = len(self.blocks)
         transformer_options["block_type"] = "double"
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.blocks), x.device, transformer_options)
         for i, block in enumerate(self.blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, block)
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -621,6 +624,8 @@ class WanModel(torch.nn.Module):
                 for p in patches["double_block"]:
                     out = p({"img": x, "x": x_input, "vec": e, "block_index": i, "img_offset": img_offset, "transformer_options": transformer_options})
                     x = out["img"]
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, None)
 
         # head
         x = self.head(x, e)
@@ -830,7 +835,9 @@ class VaceWanModel(WanModel):
         blocks_replace = patches_replace.get("dit", {})
         transformer_options["total_blocks"] = len(self.blocks)
         transformer_options["block_type"] = "double"
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.blocks), x.device, transformer_options)
         for i, block in enumerate(self.blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, block)
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -853,6 +860,8 @@ class VaceWanModel(WanModel):
                     c_skip, c[iii] = self.vace_blocks[ii](c[iii], x=x_orig, e=e0, freqs=freqs, context=context, context_img_len=context_img_len, transformer_options=transformer_options)
                     x += c_skip * vace_strength[iii]
                 del c_skip
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, None)
+
         # head
         x = self.head(x, e)
 
@@ -939,7 +948,9 @@ class CameraWanModel(WanModel):
         blocks_replace = patches_replace.get("dit", {})
         transformer_options["total_blocks"] = len(self.blocks)
         transformer_options["block_type"] = "double"
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.blocks), x.device, transformer_options)
         for i, block in enumerate(self.blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, block)
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -955,6 +966,8 @@ class CameraWanModel(WanModel):
                 for p in patches["double_block"]:
                     out = p({"img": x, "x": x_input, "vec": e, "block_index": i, "img_offset": 0, "transformer_options": transformer_options})
                     x = out["img"]
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, None)
 
         # head
         x = self.head(x, e)
@@ -1416,7 +1429,9 @@ class WanModel_S2V(WanModel):
         blocks_replace = patches_replace.get("dit", {})
         transformer_options["total_blocks"] = len(self.blocks)
         transformer_options["block_type"] = "double"
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.blocks), x.device, transformer_options)
         for i, block in enumerate(self.blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, block)
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -1435,6 +1450,8 @@ class WanModel_S2V(WanModel):
 
             if audio_emb is not None:
                 x = self.audio_injector(x, i, audio_emb, audio_emb_global, seq_len)
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, None)
+
         # head
         x = self.head(x, e)
 
@@ -1675,7 +1692,9 @@ class HumoWanModel(WanModel):
         blocks_replace = patches_replace.get("dit", {})
         transformer_options["total_blocks"] = len(self.blocks)
         transformer_options["block_type"] = "double"
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.blocks), x.device, transformer_options)
         for i, block in enumerate(self.blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, block)
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -1691,6 +1710,8 @@ class HumoWanModel(WanModel):
                 for p in patches["double_block"]:
                     out = p({"img": x, "x": x_input, "vec": e, "block_index": i, "img_offset": 0, "transformer_options": transformer_options})
                     x = out["img"]
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, None)
 
         # head
         x = self.head(x, e)
@@ -1754,7 +1775,9 @@ class SCAILWanModel(WanModel):
         blocks_replace = patches_replace.get("dit", {})
         transformer_options["total_blocks"] = len(self.blocks)
         transformer_options["block_type"] = "double"
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.blocks), x.device, transformer_options)
         for i, block in enumerate(self.blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, block)
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -1770,6 +1793,8 @@ class SCAILWanModel(WanModel):
                 for p in patches["double_block"]:
                     out = p({"img": x, "x": x_input, "vec": e, "block_index": i, "img_offset": img_offset, "transformer_options": transformer_options})
                     x = out["img"]
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, None)
 
         # head
         x = self.head(x, e)

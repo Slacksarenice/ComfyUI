@@ -1182,7 +1182,7 @@ class VAE:
                     if preallocated:
                         self.first_stage_model.decode(samples, output_buffer=pixel_samples[x:x+batch_number], **vae_options)
                     else:
-                        out = self.first_stage_model.decode(samples, **vae_options).to(device=self.output_device, dtype=self.vae_output_dtype(), copy=True)
+                        out = self.first_stage_model.decode(samples, **vae_options)
                         if pixel_samples is None:
                             pixel_samples = torch.empty((samples_in.shape[0],) + tuple(out.shape[1:]), device=self.output_device, dtype=self.vae_output_dtype())
                         pixel_samples[x:x+batch_number].copy_(out)
@@ -1212,10 +1212,16 @@ class VAE:
                 elif dims == 3:
                     tile = 256 // self.spacial_compression_decode()
                     overlap = tile // 4
+                    tile_t = None
+                    overlap_t = None
+                    temporal_compression = self.temporal_compression_decode()
+                    if temporal_compression is not None:
+                        tile_t = max(2, 64 // temporal_compression)
+                        overlap_t = max(1, min(tile_t // 2, 8 // temporal_compression))
                     if self.handles_tiling:
-                        pixel_samples = self._decode_tiled_owned(samples_in, tile_x=tile, tile_y=tile, overlap=overlap)
+                        pixel_samples = self._decode_tiled_owned(samples_in, **self._owned_tiled_args(tile, tile, overlap, tile_t, overlap_t))
                     else:
-                        pixel_samples = self.decode_tiled_3d(samples_in, tile_x=tile, tile_y=tile, overlap=(1, overlap, overlap))
+                        pixel_samples = self.decode_tiled_3d(samples_in, tile_t=tile_t if tile_t is not None else 999, tile_x=tile, tile_y=tile, overlap=(overlap_t if overlap_t is not None else 1, overlap, overlap))
 
         pixel_samples = pixel_samples.to(self.output_device).movedim(1,-1)
         return pixel_samples
@@ -1300,7 +1306,10 @@ class VAE:
                     if self.handles_tiling:
                         samples = self._encode_tiled_owned(pixel_samples, tile_x=tile, tile_y=tile, overlap=overlap)
                     else:
-                        samples = self.encode_tiled_3d(pixel_samples, tile_x=tile, tile_y=tile, overlap=(1, overlap, overlap))
+                        tile_t_latent = max(2, self.downscale_ratio[0](64))
+                        tile_t = self.upscale_ratio[0](tile_t_latent)
+                        overlap_t = self.upscale_ratio[0](max(1, min(tile_t_latent // 2, self.downscale_ratio[0](8))))
+                        samples = self.encode_tiled_3d(pixel_samples, tile_t=tile_t, tile_x=tile, tile_y=tile, overlap=(overlap_t, overlap, overlap))
                 elif self.latent_dim == 1 or self.extra_1d_channel is not None:
                     samples = self.encode_tiled_1d(pixel_samples)
                 else:

@@ -1,3 +1,5 @@
+import time
+
 import torch
 from PIL import Image
 from comfy.cli_args import args, LatentPreviewMethod
@@ -11,6 +13,7 @@ import logging
 default_preview_method = args.preview_method
 
 MAX_PREVIEW_RESOLUTION = args.preview_size
+MIN_PREVIEW_INTERVAL = 0.1
 VIDEO_TAES = ["taehv", "lighttaew2_2", "lighttaew2_1", "lighttaehy1_5", "taeltx_2"]
 
 def preview_to_image(latent_image, do_scale=True):
@@ -117,15 +120,21 @@ def prepare_callback(model, steps, x0_output_dict=None):
     previewer = get_previewer(model.load_device, model.model.latent_format)
 
     pbar = comfy.utils.ProgressBar(steps)
+    last_preview_time = [0.0]
     def callback(step, x0, x, total_steps):
         if x0_output_dict is not None:
             x0_output_dict["x0"] = x0
 
         preview_bytes = None
         if previewer:
-            if x0.is_nested:
-                x0 = x0.tensors[0]
-            preview_bytes = previewer.decode_latent_to_preview_image(preview_format, x0)
+            now = time.perf_counter()
+            # Decoding a preview for every step wastes GPU time when steps are fast,
+            # the frontend throttles display updates anyway. Always decode the last step.
+            if step + 1 >= total_steps or now - last_preview_time[0] >= MIN_PREVIEW_INTERVAL:
+                last_preview_time[0] = now
+                if x0.is_nested:
+                    x0 = x0.tensors[0]
+                preview_bytes = previewer.decode_latent_to_preview_image(preview_format, x0)
         pbar.update_absolute(step + 1, total_steps, preview_bytes)
     return callback
 

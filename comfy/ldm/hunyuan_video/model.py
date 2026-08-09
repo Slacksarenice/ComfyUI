@@ -1,6 +1,7 @@
 #Based on Flux code because of weird hunyuan video code license.
 
 import torch
+import comfy.model_prefetch
 import comfy.patcher_extension
 import comfy.ldm.flux.layers
 import comfy.ldm.modules.diffusionmodules.mmdit
@@ -390,9 +391,11 @@ class HunyuanVideo(nn.Module):
             attn_mask = None
 
         blocks_replace = patches_replace.get("dit", {})
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.double_blocks) + list(self.single_blocks), img.device, transformer_options)
         transformer_options["total_blocks"] = len(self.double_blocks)
         transformer_options["block_type"] = "double"
         for i, block in enumerate(self.double_blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, block)
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -419,6 +422,7 @@ class HunyuanVideo(nn.Module):
         transformer_options["block_type"] = "single"
         transformer_options["img_slice"] = [txt.shape[1], img.shape[1]]
         for i, block in enumerate(self.single_blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, block)
             transformer_options["block_index"] = i
             if ("single_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -437,6 +441,8 @@ class HunyuanVideo(nn.Module):
                     add = control_o[i]
                     if add is not None:
                         img[:, txt.shape[1]: img_len + txt.shape[1]] += add
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, None)
 
         img = img[:, txt.shape[1]: img_len + txt.shape[1]]
         if ref_latent is not None:

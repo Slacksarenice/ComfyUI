@@ -72,6 +72,15 @@ try:
                 SDPBackend.MATH,
             ]
 
+            try:
+                if comfy.model_management.is_nvidia_blackwell_or_newer():
+                    # cuDNN attention is currently faster than the pytorch flash kernels on sm_120
+                    SDPA_BACKEND_PRIORITY.remove(SDPBackend.CUDNN_ATTENTION)
+                    SDPA_BACKEND_PRIORITY.insert(0, SDPBackend.CUDNN_ATTENTION)
+                    logging.info("Prioritizing cuDNN scaled dot product attention backend.")
+            except Exception:
+                pass
+
             def scaled_dot_product_attention(q, k, v, *args, **kwargs):
                 if q.nelement() < 1024 * 128:  # arbitrary number, for small inputs cudnn attention seems slower
                     return torch.nn.functional.scaled_dot_product_attention(q, k, v, *args, **kwargs)

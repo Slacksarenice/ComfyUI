@@ -1584,7 +1584,7 @@ class ModelPatcher:
     def patch_hooks(self, hooks: comfy.hooks.HookGroup):
         with self.use_ejected():
             if hooks is not None:
-                model_sd_keys = list(self.model_state_dict().keys())
+                model_sd_keys = set(self.model_state_dict().keys())
                 memory_counter = None
                 if self.hook_mode == comfy.hooks.EnumHookMode.MaxSpeed:
                     # TODO: minimum_counter should have a minimum that conforms to loaded model requirements
