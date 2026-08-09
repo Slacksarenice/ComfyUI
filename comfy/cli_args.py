@@ -111,6 +111,8 @@ fpte_group.add_argument("--bf16-text-enc", action="store_true", help="Store text
 parser.add_argument("--fp16-intermediates", action="store_true", help="Experimental: Use fp16 for intermediate tensors between nodes instead of fp32.")
 
 parser.add_argument("--force-channels-last", action="store_true", help="Force channels last format when inferencing the models.")
+parser.add_argument("--disable-channels-last", action="store_true", help="Disable the automatic channels last format on GPUs where it is enabled by default. Use this if a model produces wrong outputs with channels last.")
+parser.add_argument("--disable-tf32", action="store_true", help="Disable TF32 tensor cores for fp32 matmul and convolutions on GPUs where they are enabled by default. Use this if a model produces black or corrupted outputs.")
 
 parser.add_argument("--directml", type=int, nargs="?", metavar="DIRECTML_DEVICE", const=-1, help="Use torch-directml.")
 

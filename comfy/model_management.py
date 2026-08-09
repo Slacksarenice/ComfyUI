@@ -540,12 +540,12 @@ def is_nvidia_blackwell_or_newer(device=None):
     return props.major >= 10
 
 try:
-    if is_nvidia_blackwell_or_newer():
+    if is_nvidia_blackwell_or_newer() and not args.disable_tf32:
         # TF32 only affects fp32 matmuls and convolutions (fp32 VAEs, CLIP and
         # controlnet fp32 paths). ~10 bit mantissa but tensor core throughput.
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
-        logging.info("Enabled TF32 tensor cores for fp32 matmul and convolutions.")
+        logging.info("Enabled TF32 tensor cores for fp32 matmul and convolutions. Disable with --disable-tf32 if a model misbehaves.")
 except Exception:
     pass
 
@@ -859,16 +859,30 @@ def offloaded_memory(loaded_models, device):
     return offloaded_mem
 
 WINDOWS = any(platform.win32_ver())
+WSL = is_wsl()
 
 EXTRA_RESERVED_VRAM = 400 * 1024 * 1024
 if WINDOWS:
     EXTRA_RESERVED_VRAM = 600 * 1024 * 1024 #Windows is higher because of the shared vram issue
     if total_vram > (15 * 1024):  # more extra reserved vram on 16GB+ cards
         EXTRA_RESERVED_VRAM += 100 * 1024 * 1024
+elif WSL:
+    # WSL2 shares the GPU with the Windows host through paravirtualization.
+    # When VRAM runs low the host driver silently demotes GPU allocations to
+    # system memory instead of raising OOM, which makes inference extremely
+    # slow and invisible to our memory accounting. Reserve enough headroom for
+    # the host compositor and applications so the working set never gets there.
+    EXTRA_RESERVED_VRAM = 1024 * 1024 * 1024
+    if total_vram > (15 * 1024):
+        EXTRA_RESERVED_VRAM += 256 * 1024 * 1024
 
 if args.reserve_vram is not None:
     EXTRA_RESERVED_VRAM = args.reserve_vram * 1024 * 1024 * 1024
     logging.debug("Reserving {}MB vram for other applications.".format(EXTRA_RESERVED_VRAM / (1024 * 1024)))
+
+if WSL:
+    logging.info("WSL2 detected: reserving {}MB of VRAM for the Windows host, override with --reserve-vram.".format(EXTRA_RESERVED_VRAM // (1024 * 1024)))
+    logging.info("WSL2 tip: in the Windows NVIDIA Control Panel set 'CUDA - Sysmem Fallback Policy' to 'Prefer No Sysmem Fallback' so VRAM overflows fail fast instead of spilling into slow system memory.")
 
 def extra_reserved_memory():
     return EXTRA_RESERVED_VRAM
@@ -1349,6 +1363,9 @@ def force_channels_last():
     if args.force_channels_last:
         return True
 
+    if args.disable_channels_last:
+        return False
+
     # cuDNN picks NHWC tensor core kernels for fp16/bf16 convolutions,
     # transformer models only have a few conv layers so this is a no-op for them
     if is_nvidia_blackwell_or_newer():
@@ -1594,6 +1611,11 @@ if not args.disable_pinned_memory:
         ram = get_total_memory(torch.device("cpu"))
         if WINDOWS:
             MAX_PINNED_MEMORY = ram * 0.40  # Windows limit is apparently 50%
+        elif WSL:
+            # ram here is the WSL2 VM's memory. Pinned pages can never be
+            # reclaimed by the WSL2 balloon driver, so pinning most of the VM
+            # starves the Windows host and stalls GPU paravirtualization.
+            MAX_PINNED_MEMORY = ram * 0.40
         else:
             MAX_PINNED_MEMORY = max(ram * 0.40, min(ram * 0.90, ram - 4 * 1024 ** 3, ram + get_disk_swap_total() - 16 * 1024 ** 3))
         logging.info("Enabled pinned memory {}".format(MAX_PINNED_MEMORY // (1024 * 1024)))
