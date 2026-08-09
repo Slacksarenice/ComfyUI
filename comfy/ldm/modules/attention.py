@@ -41,9 +41,11 @@ except ImportError as e:
     if model_management.sage_attention3_enabled():
         if e.name == "sageattn3":
             logging.error(f"\n\nTo use the `--use-sage-attention3` feature, the `sageattn3` package must be installed first.\ncommand:\n\t{sys.executable} -m pip install sageattn3")
+            exit(-1)
         else:
-            raise e
-        exit(-1)
+            # The package is installed but its compiled kernels do not load,
+            # usually a wheel built for a different pytorch or CUDA version.
+            logging.warning(f"--use-sage-attention3 was requested but the sageattn3 package failed to load: {e}\nThe installed wheel likely does not match this pytorch build, falling back to pytorch attention.")
 
 FLASH_ATTENTION_IS_AVAILABLE = False
 FLASH_ATTN_SDPA_FALLBACK_LOGGED = False
@@ -766,11 +768,14 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
 
 optimized_attention = attention_basic
 
-if model_management.sage_attention3_enabled():
+if model_management.sage_attention3_enabled() and SAGE_ATTENTION3_IS_AVAILABLE:
     if not model_management.is_nvidia_blackwell_or_newer():
         logging.warning("--use-sage-attention3 requires a Blackwell or newer GPU, most attention will fall back to pytorch attention.")
     logging.info("Using sage attention 3")
     optimized_attention = attention3_sage
+elif model_management.sage_attention3_enabled():
+    logging.warning("sage attention 3 is not available, using pytorch attention instead.")
+    optimized_attention = attention_pytorch
 elif model_management.sage_attention_enabled():
     logging.info("Using sage attention")
     optimized_attention = attention_sage
