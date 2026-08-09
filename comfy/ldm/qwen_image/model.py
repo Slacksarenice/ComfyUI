@@ -9,6 +9,7 @@ from comfy.ldm.lightricks.model import TimestepEmbedding, Timesteps
 from comfy.ldm.modules.attention import optimized_attention_masked
 from comfy.ldm.flux.layers import EmbedND
 import comfy.ldm.common_dit
+import comfy.model_prefetch
 import comfy.patcher_extension
 from comfy.ldm.flux.math import apply_rope1
 
@@ -521,9 +522,11 @@ class QwenImageTransformer2DModel(nn.Module):
         image_rotary_emb = self.pe_embedder(ids).to(x.dtype).contiguous()
         del ids, txt_ids, img_ids
 
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.transformer_blocks), hidden_states.device, transformer_options)
         transformer_options["total_blocks"] = len(self.transformer_blocks)
         transformer_options["block_type"] = "double"
         for i, block in enumerate(self.transformer_blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, hidden_states.device, block)
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
                 def block_wrap(args):
@@ -556,6 +559,8 @@ class QwenImageTransformer2DModel(nn.Module):
                     add = control_i[i]
                     if add is not None:
                         hidden_states[:, :add.shape[1]] += add
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, hidden_states.device, None)
 
         if timestep_zero_index is not None:
             temb = temb.chunk(2, dim=0)[0]

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 from einops import rearrange, repeat
+import comfy.model_prefetch
 import comfy.patcher_extension
 import comfy.ldm.common_dit
 
@@ -181,9 +182,11 @@ class Chroma(nn.Module):
         pe = self.pe_embedder(ids)
 
         blocks_replace = patches_replace.get("dit", {})
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.double_blocks) + list(self.single_blocks), img.device, transformer_options)
         transformer_options["total_blocks"] = len(self.double_blocks)
         transformer_options["block_type"] = "double"
         for i, block in enumerate(self.double_blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, block)
             transformer_options["block_index"] = i
             if i not in self.skip_mmdit:
                 double_mod = (
@@ -231,6 +234,7 @@ class Chroma(nn.Module):
         transformer_options["block_type"] = "single"
         transformer_options["img_slice"] = [txt.shape[1], img.shape[1]]
         for i, block in enumerate(self.single_blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, block)
             transformer_options["block_index"] = i
             if i not in self.skip_dit:
                 single_mod = self.get_modulations(mod_vectors, "single", idx=i)
@@ -260,6 +264,8 @@ class Chroma(nn.Module):
                         add = control_o[i]
                         if add is not None:
                             img[:, txt.shape[1] :, ...] += add
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, None)
 
         img = img[:, txt.shape[1] :, ...]
         if hasattr(self, "final_layer"):

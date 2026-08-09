@@ -539,6 +539,16 @@ def is_nvidia_blackwell_or_newer(device=None):
     props = torch.cuda.get_device_properties(device)
     return props.major >= 10
 
+try:
+    if is_nvidia_blackwell_or_newer():
+        # TF32 only affects fp32 matmuls and convolutions (fp32 VAEs, CLIP and
+        # controlnet fp32 paths). ~10 bit mantissa but tensor core throughput.
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        logging.info("Enabled TF32 tensor cores for fp32 matmul and convolutions.")
+except Exception:
+    pass
+
 
 PRIORITIZE_FP16 = False  # TODO: remove and replace with something that shows exactly which dtype is faster than the other
 try:
@@ -1339,7 +1349,11 @@ def force_channels_last():
     if args.force_channels_last:
         return True
 
-    #TODO
+    # cuDNN picks NHWC tensor core kernels for fp16/bf16 convolutions,
+    # transformer models only have a few conv layers so this is a no-op for them
+    if is_nvidia_blackwell_or_newer():
+        return True
+
     return False
 
 

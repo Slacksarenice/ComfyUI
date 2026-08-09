@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import comfy.ldm.common_dit
 import comfy.model_management
+import comfy.model_prefetch
 import comfy.ops
 import comfy.quant_ops
 
@@ -857,8 +858,10 @@ class NextDiT(nn.Module):
 
         transformer_options["total_blocks"] = len(self.layers)
         transformer_options["block_type"] = "double"
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.layers), img.device, transformer_options)
         img_input = img
         for i, layer in enumerate(self.layers):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, layer)
             transformer_options["block_index"] = i
             img = layer(img, mask, freqs_cis, adaln_input, timestep_zero_index=timestep_zero_index, transformer_options=transformer_options)
             if "double_block" in patches:
@@ -868,6 +871,8 @@ class NextDiT(nn.Module):
                         img[:, cap_size[0]:] = out["img"]
                     if "txt" in out:
                         img[:, :cap_size[0]] = out["txt"]
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, None)
 
         img = self.final_layer(img, adaln_input, timestep_zero_index=timestep_zero_index)
         img = self.unpatchify(img, img_size, cap_size, return_tensor=x_is_tensor)[:, :, :h, :w]
@@ -1088,8 +1093,10 @@ class NextDiTPixelSpace(NextDiT):
 
         transformer_options["total_blocks"] = len(self.layers)
         transformer_options["block_type"] = "double"
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.layers), img.device, transformer_options)
         img_input = img
         for i, layer in enumerate(self.layers):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, layer)
             transformer_options["block_index"] = i
             img = layer(img, mask, freqs_cis, adaln_input, timestep_zero_index=timestep_zero_index, transformer_options=transformer_options)
             if "double_block" in patches:
@@ -1099,6 +1106,8 @@ class NextDiTPixelSpace(NextDiT):
                         img[:, cap_size[0]:] = out["img"]
                     if "txt" in out:
                         img[:, :cap_size[0]] = out["txt"]
+
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, img.device, None)
 
         # ---- pixel-space decoder (replaces final_layer + unpatchify) ----
         # img may have padding tokens beyond N; only the first N are real image patches

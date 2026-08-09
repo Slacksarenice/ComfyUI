@@ -1013,6 +1013,12 @@ class VAE:
             dtype = model_management.vae_dtype(self.device, self.working_dtypes)
         self.vae_dtype = dtype
         self.first_stage_model.to(self.vae_dtype)
+        if self.latent_dim == 2 and model_management.force_channels_last():
+            try:
+                self.first_stage_model.to(memory_format=torch.channels_last)
+                logging.debug("using channels last mode for VAE")
+            except Exception:
+                pass
         model_management.archive_model_dtypes(self.first_stage_model)
         self.output_device = model_management.intermediate_device()
 
