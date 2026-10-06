@@ -532,10 +532,8 @@ class DismantledBlock(nn.Module):
 
     def post_attention(self, attn, x, gate_msa, shift_mlp, scale_mlp, gate_mlp):
         assert not self.pre_only
-        x = x + gate_msa.unsqueeze(1) * self.attn.post_attention(attn)
-        x = x + gate_mlp.unsqueeze(1) * self.mlp(
-            modulate(self.norm2(x), shift_mlp, scale_mlp)
-        )
+        x = torch.addcmul(x, gate_msa.unsqueeze(1), self.attn.post_attention(attn))
+        x = torch.addcmul(x, gate_mlp.unsqueeze(1), self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)))
         return x
 
     def pre_attention_x(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
@@ -568,9 +566,7 @@ class DismantledBlock(nn.Module):
         attn1 = self.attn.post_attention(attn)
         attn2 = self.attn2.post_attention(attn2)
         x = gate_cat(x, gate_msa, gate_msa2, attn1, attn2)
-        x = x + gate_mlp.unsqueeze(1) * self.mlp(
-            modulate(self.norm2(x), shift_mlp, scale_mlp)
-        )
+        x = torch.addcmul(x, gate_mlp.unsqueeze(1), self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp)))
         return x
 
     def forward(self, x: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
