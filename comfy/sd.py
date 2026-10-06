@@ -1291,7 +1291,7 @@ class VAE:
                     if preallocated:
                         self.first_stage_model.decode(samples, output_buffer=pixel_samples[x:x+batch_number], **vae_options)
                     else:
-                        out = self.first_stage_model.decode(samples, **vae_options).to(device=self.output_device, dtype=self.vae_output_dtype(), copy=True)
+                        out = self.first_stage_model.decode(samples, **vae_options)
                         if pixel_samples is None:
                             with comfy.model_prefetch.pause_malloc_graph():
                                 pixel_samples = torch.empty((samples_in.shape[0],) + tuple(out.shape[1:]), device=self.output_device, dtype=self.vae_output_dtype())
