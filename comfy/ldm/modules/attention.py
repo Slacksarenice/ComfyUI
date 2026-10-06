@@ -846,6 +846,9 @@ except AttributeError as error:
 
 @wrap_attn
 def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape=False, skip_output_reshape=False, **kwargs):
+    if mask is not None:
+        return attention_pytorch(q, k, v, heads, mask=mask, skip_reshape=skip_reshape, skip_output_reshape=skip_output_reshape, **kwargs)
+
     if skip_reshape:
         b, _, _, dim_head = q.shape
     else:
@@ -854,17 +857,7 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
         q, k, v = _reshape_qkv_to_heads(q, k, v, b, heads, dim_head, kwargs.get("enable_gqa", False), expand_kv=False)
         q, k, v = map(lambda t: t.transpose(1, 2), (q, k, v))
 
-    if mask is not None:
-        # add a batch dimension if there isn't already one
-        if mask.ndim == 2:
-            mask = mask.unsqueeze(0)
-        # add a heads dimension if there isn't already one
-        if mask.ndim == 3:
-            mask = mask.unsqueeze(1)
-
     try:
-        if mask is not None:
-            raise RuntimeError("Mask must not be set for Flash attention")
         out = flash_attn_wrapper(
             q.transpose(1, 2),
             k.transpose(1, 2),
@@ -875,12 +868,7 @@ def attention_flash(q, k, v, heads, mask=None, attn_precision=None, skip_reshape
         ).transpose(1, 2)
     except Exception as e:
         logging.warning(f"Flash Attention failed, using default SDPA: {e}")
-        sdpa_extra = {}
-        if kwargs.get("enable_gqa", False):
-            sdpa_extra["enable_gqa"] = True
-        if "scale" in kwargs:
-            sdpa_extra["scale"] = kwargs["scale"]
-        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False, **sdpa_extra)
+        return attention_pytorch(q, k, v, heads, skip_reshape=True, skip_output_reshape=skip_output_reshape, **kwargs)
     if not skip_output_reshape:
         out = (
             out.transpose(1, 2).reshape(b, -1, heads * dim_head)
