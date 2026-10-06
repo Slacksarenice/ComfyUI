@@ -15,6 +15,7 @@ import comfy.patcher_extension
 from comfy.ldm.modules.attention import AttentionTensorContainer, ComfyAttention, optimized_attention
 from comfy.ldm.flux.layers import modulated_norm
 import comfy.ldm.common_dit
+import comfy.model_prefetch
 import comfy.ops
 import comfy.quant_ops
 
@@ -918,7 +919,9 @@ class MiniTrainDIT(nn.Module):
         if x_B_T_H_W_D.dtype == torch.float16:
             x_B_T_H_W_D = x_B_T_H_W_D.float()
 
+        prefetch_queue = comfy.model_prefetch.make_prefetch_queue(list(self.blocks), x.device, transformer_options)
         for block_index, block in enumerate(self.blocks):
+            comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, block, x.dtype, malloc_scope="block")
             transformer_options["block_index"] = block_index
             x_B_T_H_W_D = block(
                 x_B_T_H_W_D,
@@ -926,6 +929,7 @@ class MiniTrainDIT(nn.Module):
                 crossattn_emb,
                 **block_kwargs,
             )
+        comfy.model_prefetch.prefetch_queue_pop(prefetch_queue, x.device, None, malloc_scope="block")
 
         x_B_T_H_W_O = self.final_layer(x_B_T_H_W_D.to(crossattn_emb.dtype), t_embedding_B_T_D, adaln_lora_B_T_3D=adaln_lora_B_T_3D)
         x_B_C_Tt_Hp_Wp = self.unpatchify(x_B_T_H_W_O)[:, :, :orig_shape[-3], :orig_shape[-2], :orig_shape[-1]]
