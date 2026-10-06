@@ -107,10 +107,6 @@ class AnimaLLLiteModule(nn.Module):
         if x.ndim == 5:
             x = x.flatten(1, 3)
 
-        if x.shape[0] != cond_emb.shape[0]:
-            if x.shape[0] % cond_emb.shape[0] != 0:
-                raise ValueError(f"Anima LLLite batch mismatch: model input batch {x.shape[0]}, control batch {cond_emb.shape[0]}")
-            cond_emb = cond_emb.repeat(x.shape[0] // cond_emb.shape[0], 1, 1)
         if x.shape[1] != cond_emb.shape[1]:
             raise ValueError(f"Anima LLLite sequence mismatch: model input has {x.shape[1]} tokens, control has {cond_emb.shape[1]}")
 
@@ -118,8 +114,8 @@ class AnimaLLLiteModule(nn.Module):
         hidden = F.silu(self.down(x))
         gamma, beta = self.cond_to_film(cond_local).chunk(2, dim=-1)
         hidden = self.mid(torch.cat((cond_local, hidden), dim=-1))
-        hidden = F.silu(hidden * (1 + gamma) + beta)
-        x = x + self.up(hidden) * strength
+        hidden = F.silu(torch.addcmul(beta, hidden, 1 + gamma))
+        x = torch.add(x, self.up(hidden), alpha=strength)
 
         if len(original_shape) == 5:
             x = x.reshape(original_shape)
@@ -192,6 +188,7 @@ class AnimaLLLitePatch:
         self.strength = strength
         self.sigma_start = sigma_start
         self.sigma_end = sigma_end
+        self.cond_embs = {}
 
     def __call__(self, args):
         x = args["x"]
@@ -206,6 +203,19 @@ class AnimaLLLitePatch:
         if x.shape[2] != 1:
             raise ValueError(f"Anima LLLite only supports T=1, got T={x.shape[2]}")
 
+        key = (tuple(x.shape[-2:]), x.dtype, x.device)
+        cond_emb = self.cond_embs.get(key)
+        if cond_emb is None:
+            # reused for every step of this sampling run, cleared in cleanup()
+            cond_emb = self.cond_embs[key] = self.encode(x).detach()
+        if cond_emb.shape[0] != x.shape[0]:
+            if x.shape[0] % cond_emb.shape[0] != 0:
+                raise ValueError(f"Anima LLLite batch mismatch: model input batch {x.shape[0]}, control batch {cond_emb.shape[0]}")
+            cond_emb = cond_emb.repeat(x.shape[0] // cond_emb.shape[0], 1, 1)
+        transformer_options["model_patch_data"][self] = cond_emb
+        return args
+
+    def encode(self, x):
         target_height = x.shape[-2] * 8
         target_width = x.shape[-1] * 8
         image = comfy.utils.common_upscale(
@@ -233,9 +243,10 @@ class AnimaLLLitePatch:
                 image = image * (mask < 0.5).to(image.dtype)
             image = torch.cat((image, mask * 2.0 - 1.0), dim=1)
 
-        cond_emb = self.model_patch.model.encode_conditioning(image)
-        transformer_options["model_patch_data"][self] = cond_emb
-        return args
+        return self.model_patch.model.encode_conditioning(image)
+
+    def cleanup(self):
+        self.cond_embs = {}
 
     def to(self, device_or_dtype):
         return self
