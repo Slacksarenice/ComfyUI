@@ -305,44 +305,27 @@ class MOEFeedForwardSwiGLU(nn.Module):
         self.num_activated_experts = num_activated_experts
 
     def forward(self, x):
-        wtype = x.dtype
         identity = x
         orig_shape = x.shape
         topk_idx, topk_weight, aux_loss = self.gate(x)
         x = x.view(-1, x.shape[-1])
-        flat_topk_idx = topk_idx.view(-1)
-        if True:  # self.training: # TODO: check which branch performs faster
-            x = x.repeat_interleave(self.num_activated_experts, dim=0)
-            y = torch.empty_like(x, dtype=wtype)
-            for i, expert in enumerate(self.experts):
-                y[flat_topk_idx == i] = expert(x[flat_topk_idx == i]).to(dtype=wtype)
-            y = (y.view(*topk_weight.shape, -1) * topk_weight.unsqueeze(-1)).sum(dim=1)
-            y =  y.view(*orig_shape).to(dtype=wtype)
-            #y = AddAuxiliaryLoss.apply(y, aux_loss)
-        else:
-            y = self.moe_infer(x, flat_topk_idx, topk_weight.view(-1, 1)).view(*orig_shape)
+        y = self.moe_infer(x, topk_idx.view(-1), topk_weight.view(-1, 1)).view(*orig_shape)
         y = y + self.shared_experts(identity)
         return y
 
-    @torch.no_grad()
     def moe_infer(self, x, flat_expert_indices, flat_expert_weights):
         expert_cache = torch.zeros_like(x)
         idxs = flat_expert_indices.argsort()
-        tokens_per_expert = flat_expert_indices.bincount().cpu().numpy().cumsum(0)
+        tokens_per_expert = flat_expert_indices.bincount(minlength=len(self.experts)).cumsum(0).tolist()
         token_idxs = idxs // self.num_activated_experts
-        for i, end_idx in enumerate(tokens_per_expert):
-            start_idx = 0 if i == 0 else tokens_per_expert[i-1]
-            if start_idx == end_idx:
-                continue
-            expert = self.experts[i]
-            exp_token_idx = token_idxs[start_idx:end_idx]
-            expert_tokens = x[exp_token_idx]
-            expert_out = expert(expert_tokens)
-            expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]])
-
-            # for fp16 and other dtype
-            expert_cache = expert_cache.to(expert_out.dtype)
-            expert_cache.scatter_reduce_(0, exp_token_idx.view(-1, 1).repeat(1, x.shape[-1]), expert_out, reduce='sum')
+        start_idx = 0
+        for expert, end_idx in zip(self.experts, tokens_per_expert):
+            if end_idx > start_idx:
+                exp_token_idx = token_idxs[start_idx:end_idx]
+                expert_out = expert(x[exp_token_idx])
+                expert_out.mul_(flat_expert_weights[idxs[start_idx:end_idx]])
+                expert_cache.index_add_(0, exp_token_idx, expert_out)
+            start_idx = end_idx
         return expert_cache
 
 
