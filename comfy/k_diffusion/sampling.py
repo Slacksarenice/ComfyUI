@@ -244,13 +244,14 @@ def sample_euler_ancestral_RF(model, x, sigmas, extra_args=None, callback=None, 
     noise_sampler = default_noise_sampler(x, seed=seed) if noise_sampler is None else noise_sampler
     s_noise = s_noise * getattr(model.inner_model.model_patcher.get_model_object('model_sampling'), "noise_scale", 1.0)
     s_in = x.new_ones([x.shape[0]])
+    sigmas_cpu = sigmas.tolist()
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
         # sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=eta)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
 
-        if sigmas[i + 1] == 0:
+        if sigmas_cpu[i + 1] == 0:
             x = denoised
         else:
             downstep_ratio = 1 + (sigmas[i + 1] / sigmas[i] - 1) * eta
@@ -270,6 +271,7 @@ def sample_heun(model, x, sigmas, extra_args=None, callback=None, disable=None, 
     """Implements Algorithm 2 (Heun steps) from Karras et al. (2022)."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
+    sigmas_cpu = sigmas.tolist()
     for i in trange(len(sigmas) - 1, disable=disable):
         if s_churn > 0:
             gamma = min(s_churn / (len(sigmas) - 1), 2 ** 0.5 - 1) if s_tmin <= sigmas[i] <= s_tmax else 0.
@@ -287,7 +289,7 @@ def sample_heun(model, x, sigmas, extra_args=None, callback=None, disable=None, 
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
         dt = sigmas[i + 1] - sigma_hat
-        if sigmas[i + 1] == 0:
+        if sigmas_cpu[i + 1] == 0:
             # Euler method
             x = x + d * dt
         else:
@@ -305,6 +307,7 @@ def sample_dpm_2(model, x, sigmas, extra_args=None, callback=None, disable=None,
     """A sampler inspired by DPM-Solver-2 and Algorithm 2 from Karras et al. (2022)."""
     extra_args = {} if extra_args is None else extra_args
     s_in = x.new_ones([x.shape[0]])
+    sigmas_cpu = sigmas.tolist()
     for i in trange(len(sigmas) - 1, disable=disable):
         if s_churn > 0:
             gamma = min(s_churn / (len(sigmas) - 1), 2 ** 0.5 - 1) if s_tmin <= sigmas[i] <= s_tmax else 0.
@@ -320,7 +323,7 @@ def sample_dpm_2(model, x, sigmas, extra_args=None, callback=None, disable=None,
         d = to_d(x, sigma_hat, denoised)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigma_hat, 'denoised': denoised})
-        if sigmas[i + 1] == 0:
+        if sigmas_cpu[i + 1] == 0:
             # Euler method
             dt = sigmas[i + 1] - sigma_hat
             x = x + d * dt
@@ -498,7 +501,7 @@ def sample_lms(model, x, sigmas, extra_args=None, callback=None, disable=None, o
             ds.pop(0)
         if callback is not None:
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
-        if sigmas[i + 1] == 0:
+        if sigmas_cpu[i + 1] == 0:
             # Denoising step
             x = denoised
         else:
@@ -868,6 +871,7 @@ def sample_dpmpp_2m(model, x, sigmas, extra_args=None, callback=None, disable=No
     sigma_fn = lambda t: t.neg().exp()
     t_fn = lambda sigma: sigma.log().neg()
     old_denoised = None
+    sigmas_cpu = sigmas.tolist()
 
     for i in trange(len(sigmas) - 1, disable=disable):
         denoised = model(x, sigmas[i] * s_in, **extra_args)
@@ -875,7 +879,7 @@ def sample_dpmpp_2m(model, x, sigmas, extra_args=None, callback=None, disable=No
             callback({'x': x, 'i': i, 'sigma': sigmas[i], 'sigma_hat': sigmas[i], 'denoised': denoised})
         t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
         h = t_next - t
-        if old_denoised is None or sigmas[i + 1] == 0:
+        if old_denoised is None or sigmas_cpu[i + 1] == 0:
             x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised
         else:
             h_last = t - t_fn(sigmas[i - 1])
