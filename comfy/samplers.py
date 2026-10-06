@@ -30,6 +30,8 @@ def add_area_dims(area, num_dims):
         area = [2147483648] + area[:len(area) // 2] + [0] + area[len(area) // 2:]
     return area
 
+CondObj = collections.namedtuple('cond_obj', ['input_x', 'mult', 'conditioning', 'area', 'control', 'patches', 'uuid', 'hooks'])
+
 def get_area_and_mult(conds, x_in, timestep_in):
     dims = tuple(x_in.shape[2:])
     area = None
@@ -112,8 +114,7 @@ def get_area_and_mult(conds, x_in, timestep_in):
 
         patches['middle_patch'] = [gligen_patch]
 
-    cond_obj = collections.namedtuple('cond_obj', ['input_x', 'mult', 'conditioning', 'area', 'control', 'patches', 'uuid', 'hooks'])
-    return cond_obj(input_x, mult, conditioning, area, control, patches, conds['uuid'], hooks)
+    return CondObj(input_x, mult, conditioning, area, control, patches, conds['uuid'], hooks)
 
 def cond_equal_size(c1, c2):
     if c1 is c2:
