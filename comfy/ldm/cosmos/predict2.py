@@ -13,6 +13,7 @@ from torchvision import transforms
 
 import comfy.patcher_extension
 from comfy.ldm.modules.attention import AttentionTensorContainer, ComfyAttention, optimized_attention
+from comfy.ldm.flux.layers import modulated_norm
 import comfy.ldm.common_dit
 import comfy.ops
 import comfy.quant_ops
@@ -399,7 +400,7 @@ class FinalLayer(nn.Module):
             _scale_B_T_1_1_D: torch.Tensor,
             _shift_B_T_1_1_D: torch.Tensor,
         ) -> torch.Tensor:
-            return _norm_layer(_x_B_T_H_W_D) * (1 + _scale_B_T_1_1_D) + _shift_B_T_1_1_D
+            return modulated_norm(_x_B_T_H_W_D, _norm_layer, _scale_B_T_1_1_D, _shift_B_T_1_1_D)
 
         x_B_T_H_W_D = _fn(x_B_T_H_W_D, self.layer_norm, scale_B_T_1_1_D, shift_B_T_1_1_D)
         x_B_T_H_W_O = self.linear(x_B_T_H_W_D)
@@ -524,18 +525,18 @@ class Block(nn.Module):
         B, T, H, W, D = x_B_T_H_W_D.shape
 
         def _fn(_x_B_T_H_W_D, _norm_layer, _scale_B_T_1_1_D, _shift_B_T_1_1_D):
-            return _norm_layer(_x_B_T_H_W_D) * (1 + _scale_B_T_1_1_D) + _shift_B_T_1_1_D
+            return modulated_norm(_x_B_T_H_W_D, _norm_layer, _scale_B_T_1_1_D.to(_x_B_T_H_W_D.dtype), _shift_B_T_1_1_D.to(_x_B_T_H_W_D.dtype))
 
         normalized_x_B_T_H_W_D = _fn(
             x_B_T_H_W_D,
             self.layer_norm_self_attn,
             scale_self_attn_B_T_1_1_D,
             shift_self_attn_B_T_1_1_D,
-        )
+        ).to(compute_dtype)
         result_B_T_H_W_D = rearrange(
             self.self_attn(
                 # normalized_x_B_T_HW_D,
-                rearrange(normalized_x_B_T_H_W_D.to(compute_dtype), "b t h w d -> b (t h w) d"),
+                rearrange(normalized_x_B_T_H_W_D, "b t h w d -> b (t h w) d"),
                 None,
                 rope_emb=rope_emb_L_1_1_D,
                 transformer_options=transformer_options,
@@ -556,10 +557,10 @@ class Block(nn.Module):
         ) -> torch.Tensor:
             _normalized_x_B_T_H_W_D = _fn(
                 _x_B_T_H_W_D, layer_norm_cross_attn, _scale_cross_attn_B_T_1_1_D, _shift_cross_attn_B_T_1_1_D
-            )
+            ).to(compute_dtype)
             _result_B_T_H_W_D = rearrange(
                 self.cross_attn(
-                    rearrange(_normalized_x_B_T_H_W_D.to(compute_dtype), "b t h w d -> b (t h w) d"),
+                    rearrange(_normalized_x_B_T_H_W_D, "b t h w d -> b (t h w) d"),
                     crossattn_emb,
                     rope_emb=rope_emb_L_1_1_D,
                     transformer_options=transformer_options,
