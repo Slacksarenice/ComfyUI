@@ -265,6 +265,8 @@ class LoRAAdapter(WeightAdapterBase):
                 .transpose(0, 1)
             )
         try:
+            if dora_scale is None:
+                mat2 = mat2 * (strength * alpha)
             lora_diff = torch.mm(
                 mat1.flatten(start_dim=1), mat2.flatten(start_dim=1)
             ).reshape(weight.shape)
@@ -280,7 +282,7 @@ class LoRAAdapter(WeightAdapterBase):
                     function,
                 )
             else:
-                weight += function(((strength * alpha) * lora_diff).type(weight.dtype))
+                weight += function(lora_diff.type(weight.dtype))
         except Exception as e:
             logging.error("ERROR {} {} {}".format(self.name, key, e))
         return weight
