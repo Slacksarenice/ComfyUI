@@ -49,7 +49,7 @@ class CausalConv3d(ops.Conv3d):
 
 class RMS_norm(nn.Module):
 
-    def __init__(self, dim, channel_first=True, images=True, bias=False):
+    def __init__(self, dim, channel_first=True, images=True):
         super().__init__()
         broadcastable_dims = (1, 1, 1) if not images else (1, 1)
         shape = (dim, *broadcastable_dims) if channel_first else (dim,)
@@ -57,11 +57,9 @@ class RMS_norm(nn.Module):
         self.channel_first = channel_first
         self.scale = dim**0.5
         self.gamma = nn.Parameter(torch.ones(shape))
-        self.bias = nn.Parameter(torch.zeros(shape)) if bias else None
 
     def forward(self, x):
-        return F.normalize(
-            x, dim=(1 if self.channel_first else -1)) * self.scale * self.gamma.to(x) + (self.bias.to(x) if self.bias is not None else 0)
+        return F.normalize(x, dim=(1 if self.channel_first else -1)).mul_(self.scale).mul_(self.gamma.to(x))
 
 
 class Resample(nn.Module):
