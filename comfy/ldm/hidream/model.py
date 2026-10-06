@@ -9,7 +9,7 @@ from comfy.ldm.lightricks.model import TimestepEmbedding, Timesteps
 import torch.nn.functional as F
 
 from comfy.ldm.flux.math import apply_rope, rope
-from comfy.ldm.flux.layers import LastLayer
+from comfy.ldm.flux.layers import LastLayer, modulated_norm
 
 from comfy.ldm.modules.attention import optimized_attention
 import comfy.model_management
@@ -394,13 +394,11 @@ class HiDreamImageSingleTransformerBlock(nn.Module):
         rope: torch.FloatTensor = None,
         transformer_options={},
     ) -> torch.FloatTensor:
-        wtype = image_tokens.dtype
         shift_msa_i, scale_msa_i, gate_msa_i, shift_mlp_i, scale_mlp_i, gate_mlp_i = \
             self.adaLN_modulation(adaln_input)[:,None].chunk(6, dim=-1)
 
         # 1. MM-Attention
-        norm_image_tokens = self.norm1_i(image_tokens).to(dtype=wtype)
-        norm_image_tokens = norm_image_tokens * (1 + scale_msa_i) + shift_msa_i
+        norm_image_tokens = modulated_norm(image_tokens, self.norm1_i, scale_msa_i, shift_msa_i)
         attn_output_i = self.attn1(
             norm_image_tokens,
             image_tokens_masks,
@@ -410,9 +408,8 @@ class HiDreamImageSingleTransformerBlock(nn.Module):
         image_tokens = gate_msa_i * attn_output_i + image_tokens
 
         # 2. Feed-forward
-        norm_image_tokens = self.norm3_i(image_tokens).to(dtype=wtype)
-        norm_image_tokens = norm_image_tokens * (1 + scale_mlp_i) + shift_mlp_i
-        ff_output_i = gate_mlp_i * self.ff_i(norm_image_tokens.to(dtype=wtype))
+        norm_image_tokens = modulated_norm(image_tokens, self.norm3_i, scale_mlp_i, shift_mlp_i)
+        ff_output_i = gate_mlp_i * self.ff_i(norm_image_tokens)
         image_tokens = ff_output_i + image_tokens
         return image_tokens
 
@@ -472,16 +469,13 @@ class HiDreamImageTransformerBlock(nn.Module):
         rope: torch.FloatTensor = None,
         transformer_options={},
     ) -> torch.FloatTensor:
-        wtype = image_tokens.dtype
         shift_msa_i, scale_msa_i, gate_msa_i, shift_mlp_i, scale_mlp_i, gate_mlp_i, \
         shift_msa_t, scale_msa_t, gate_msa_t, shift_mlp_t, scale_mlp_t, gate_mlp_t = \
             self.adaLN_modulation(adaln_input)[:,None].chunk(12, dim=-1)
 
         # 1. MM-Attention
-        norm_image_tokens = self.norm1_i(image_tokens).to(dtype=wtype)
-        norm_image_tokens = norm_image_tokens * (1 + scale_msa_i) + shift_msa_i
-        norm_text_tokens = self.norm1_t(text_tokens).to(dtype=wtype)
-        norm_text_tokens = norm_text_tokens * (1 + scale_msa_t) + shift_msa_t
+        norm_image_tokens = modulated_norm(image_tokens, self.norm1_i, scale_msa_i, shift_msa_i)
+        norm_text_tokens = modulated_norm(text_tokens, self.norm1_t, scale_msa_t, shift_msa_t)
 
         attn_output_i, attn_output_t = self.attn1(
             norm_image_tokens,
@@ -495,10 +489,8 @@ class HiDreamImageTransformerBlock(nn.Module):
         text_tokens = gate_msa_t * attn_output_t + text_tokens
 
         # 2. Feed-forward
-        norm_image_tokens = self.norm3_i(image_tokens).to(dtype=wtype)
-        norm_image_tokens = norm_image_tokens * (1 + scale_mlp_i) + shift_mlp_i
-        norm_text_tokens = self.norm3_t(text_tokens).to(dtype=wtype)
-        norm_text_tokens = norm_text_tokens * (1 + scale_mlp_t) + shift_mlp_t
+        norm_image_tokens = modulated_norm(image_tokens, self.norm3_i, scale_mlp_i, shift_mlp_i)
+        norm_text_tokens = modulated_norm(text_tokens, self.norm3_t, scale_mlp_t, shift_mlp_t)
 
         ff_output_i = gate_mlp_i * self.ff_i(norm_image_tokens)
         ff_output_t = gate_mlp_t * self.ff_t(norm_text_tokens)
