@@ -1160,7 +1160,7 @@ class Anima(supported_models_base.BASE):
 
     def set_inference_dtype(self, dtype, manual_cast_dtype, **kwargs):
         self.memory_usage_factor = (self.unet_config.get("model_channels", 2048) / 2048) * 0.95
-        if dtype is torch.float16:
+        if (manual_cast_dtype or dtype) is torch.float16:
             self.memory_usage_factor *= 1.4
         return super().set_inference_dtype(dtype, manual_cast_dtype, **kwargs)
 
